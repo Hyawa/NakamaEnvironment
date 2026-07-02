@@ -5,6 +5,7 @@ import { HoopState } from "./entities/Hoop";
 import { ScoreState } from "./game/ScoreManager";
 import { PossessionState } from "./game/PossessionManager";
 import { PlayerInputState } from "./PlayerInput";
+import { MatchPhase } from "../core/constants/MatchConstants";
 
 export interface GameplayState {
   player1: PlayerState;
@@ -19,4 +20,7 @@ export interface GameplayState {
   isPaused: boolean;
   restartTimerSeconds: number;
   pendingConcededPlayerId: PlayerId | null;
+  matchTimeMs: number;
+  phase: MatchPhase;
+  winner: PlayerId | null;
 }

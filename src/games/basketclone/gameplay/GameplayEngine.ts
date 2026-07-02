@@ -10,6 +10,7 @@ import { resolveShotType, computeVelocity, ShotType } from "./game/ShotResolver"
 import { resolveGroundCollision, resolveWallCollision, resolveHoopCollision } from "./game/CollisionManager";
 import { GameplayState } from "./GameplayState";
 import { PlayerInputState, createNeutralInput } from "./PlayerInput";
+import { MatchPhase } from "../core/constants/MatchConstants";
 
 export class GameplayEngine {
   public static createInitialState(): GameplayState {
@@ -54,6 +55,9 @@ export class GameplayEngine {
       isPaused: false,
       restartTimerSeconds: 0,
       pendingConcededPlayerId: null,
+      matchTimeMs: 0,
+      phase: MatchPhase.IN_PROGRESS,
+      winner: null,
     };
   }
 
@@ -79,22 +83,13 @@ export class GameplayEngine {
 
   public static update(state: GameplayState, deltaSeconds: number, logger: nkruntime.Logger): void {
     try {
-      logger.info("[GameplayEngine.update] INÍCIO. typeof logger.debug: %s", typeof logger.debug);
-
       if (state.isPaused) {
-        logger.info("[GameplayEngine.update] Chamando updatePause...");
         this.updatePause(state, deltaSeconds, logger);
-        logger.info("[GameplayEngine.update] updatePause concluído.");
       } else {
-        logger.info("[GameplayEngine.update] Chamando updateActive...");
         this.updateActive(state, deltaSeconds, logger);
-        logger.info("[GameplayEngine.update] updateActive concluído.");
       }
 
-      logger.info("[GameplayEngine.update] Chamando commitInputHistory...");
       this.commitInputHistory(state);
-      logger.info("[GameplayEngine.update] commitInputHistory concluído.");
-      logger.info("[GameplayEngine.update] FIM.");
     } catch (error) {
       logger.error(
         "[GameplayEngine.update] Erro crítico no loop da partida. Erro: %s",
@@ -110,24 +105,23 @@ export class GameplayEngine {
     ball: BallState;
     score: ScoreState;
     isPaused: boolean;
+    matchTimeMs: number;
+    phase: MatchPhase;
+    winner: PlayerId | null;
   } {
-    logger.info("[GameplayEngine.buildSnapshot] INÍCIO.");
-    logger.info("[GameplayEngine.buildSnapshot] Construindo snapshot diretamente dos POJOs.");
-
-    const snapshot = {
+    return {
       player1: { ...state.player1 },
       player2: { ...state.player2 },
       ball: { ...state.ball },
       score: { ...state.score },
       isPaused: state.isPaused,
+      matchTimeMs: state.matchTimeMs,
+      phase: state.phase,
+      winner: state.winner,
     };
-
-    logger.info("[GameplayEngine.buildSnapshot] FIM.");
-    return snapshot;
   }
 
   private static updateActive(state: GameplayState, deltaSeconds: number, logger: nkruntime.Logger): void {
-    logger.info("[GameplayEngine.updateActive] Chamando updatePlayerFromInput (player1)...");
     this.updatePlayerFromInput(
       state,
       state.player1,
@@ -136,9 +130,7 @@ export class GameplayEngine {
       deltaSeconds,
       logger
     );
-    logger.info("[GameplayEngine.updateActive] updatePlayerFromInput (player1) concluído.");
 
-    logger.info("[GameplayEngine.updateActive] Chamando updatePlayerFromInput (player2)...");
     this.updatePlayerFromInput(
       state,
       state.player2,
@@ -147,28 +139,15 @@ export class GameplayEngine {
       deltaSeconds,
       logger
     );
-    logger.info("[GameplayEngine.updateActive] updatePlayerFromInput (player2) concluído.");
 
-    logger.info("[GameplayEngine.updateActive] Chamando syncBallToHolder...");
     this.syncBallToHolder(state);
-    logger.info("[GameplayEngine.updateActive] syncBallToHolder concluído.");
-
-    logger.info("[GameplayEngine.updateActive] Chamando updateFreeBallPhysics...");
     this.updateFreeBallPhysics(state, deltaSeconds);
-    logger.info("[GameplayEngine.updateActive] updateFreeBallPhysics concluído.");
 
     if (state.ball.holderId === null) {
-      logger.info("[GameplayEngine.updateActive] Chamando resolveGroundCollision...");
       resolveGroundCollision(state.ball, logger);
-      logger.info("[GameplayEngine.updateActive] resolveGroundCollision concluído.");
-
-      logger.info("[GameplayEngine.updateActive] Chamando resolveWallCollision...");
       resolveWallCollision(state.ball, logger);
-      logger.info("[GameplayEngine.updateActive] resolveWallCollision concluído.");
 
-      logger.info("[GameplayEngine.updateActive] Chamando resolveHoopCollision...");
       const scoringPlayerId = resolveHoopCollision(state.ball, state.hoops, state.score, logger);
-      logger.info("[GameplayEngine.updateActive] resolveHoopCollision concluído.");
 
       if (scoringPlayerId !== null) {
         this.handleBasketScored(state, scoringPlayerId, logger);
@@ -176,9 +155,7 @@ export class GameplayEngine {
       }
     }
 
-    logger.info("[GameplayEngine.updateActive] Chamando resolvePossession...");
     resolvePossession(state.possession, state.ball, state.player1, state.player2, deltaSeconds, logger);
-    logger.info("[GameplayEngine.updateActive] resolvePossession concluído.");
   }
 
   private static updatePlayerFromInput(
@@ -248,7 +225,7 @@ export class GameplayEngine {
     state.ball.vy = velocity.vy;
     startReleaseCooldown(state.possession);
 
-    logger.info("[basketclone:match] %s arremessou (%s).", shooter.id, shotType);
+    logger.debug("[basketclone:match] %s arremessou (%s).", shooter.id, shotType);
   }
 
   private static syncBallToHolder(state: GameplayState): void {
@@ -288,8 +265,10 @@ export class GameplayEngine {
     state.ball.vy = 0;
 
     logger.info(
-      "[basketclone:match] Cesta de %s. Reinício em %ds.",
+      "[basketclone:match] Cesta de %s. Score: %d x %d. Reinício em %ds.",
       scoringPlayerId,
+      state.score.player1,
+      state.score.player2,
       GameConfig.RESTART_DELAY_SECONDS
     );
   }
@@ -319,7 +298,7 @@ export class GameplayEngine {
     state.ball.x = receiver.x + receiver.width / 2;
     state.ball.y = receiver.y;
 
-    logger.info("[basketclone:match] Jogada reiniciada. Bola entregue a %s.", receiver.id);
+    logger.debug("[basketclone:match] Jogada reiniciada. Bola entregue a %s.", receiver.id);
   }
 
   private static resetPlayerToStart(player: PlayerState): void {

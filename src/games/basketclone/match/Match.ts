@@ -1,23 +1,11 @@
 // D:\Nakama\src\games\basketclone\match\Match.ts
-
 import { MATCH_CONSTANTS, MatchPhase } from "../core/constants/MatchConstants";
 import { BasketCloneMatchState } from "./MatchState";
 import { PlayerInfo } from "../core/types/MatchTypes";
 import { messageDispatcher } from "./Dispatcher";
 import { ServerOpCode } from "../core/messages/MatchMessages";
 import { GameplayEngine } from "../gameplay/GameplayEngine";
-
-/**
- * Match Handler autoritativo do basketclone.
- *
- * Agora com a lógica de gameplay (movimento, física, colisão,
- * posse, arremesso, placar, reinício após cesta) adaptada de
- * src/core/Game.ts e dependências do client — ver gameplay/.
- *
- * O que ainda NÃO está aqui: cronômetro de partida, condição de
- * vitória/derrota, e qualquer tratamento de reconexão além de
- * marcar o jogador como desconectado (ver TODO em matchLeave).
- */
+import { PlayerId } from "../gameplay/entities/Player";
 
 export const matchInit: nkruntime.MatchInitFunction<BasketCloneMatchState> = function (
   ctx,
@@ -32,9 +20,7 @@ export const matchInit: nkruntime.MatchInitFunction<BasketCloneMatchState> = fun
     players: {},
     gameplay: GameplayEngine.createInitialState(),
   };
-
   logger.info("[basketclone:match] Partida criada. params=%s", JSON.stringify(params));
-
   return {
     state,
     tickRate: MATCH_CONSTANTS.TICK_RATE,
@@ -79,7 +65,6 @@ export const matchJoin: nkruntime.MatchJoinFunction<BasketCloneMatchState> = fun
 ) {
   presences.forEach((presence) => {
     const role = GameplayEngine.assignRole(state.gameplay, presence.userId);
-
     const player: PlayerInfo = {
       userId: presence.userId,
       sessionId: presence.sessionId,
@@ -99,6 +84,7 @@ export const matchJoin: nkruntime.MatchJoinFunction<BasketCloneMatchState> = fun
 
   if (bothRolesAssigned && state.phase === MatchPhase.WAITING_FOR_PLAYERS) {
     state.phase = MatchPhase.IN_PROGRESS;
+    state.gameplay.phase = MatchPhase.IN_PROGRESS;
     logger.info("[basketclone:match] Os dois jogadores entraram. Partida iniciada.");
   }
 
@@ -116,19 +102,12 @@ export const matchLeave: nkruntime.MatchLeaveFunction<BasketCloneMatchState> = f
 ) {
   presences.forEach((presence) => {
     const player = state.players[presence.userId];
-
     if (player) {
       player.connected = false;
     }
 
     logger.info("[basketclone:match] Jogador saiu: %s", presence.userId);
   });
-
-  // TODO(produto): hoje a simulação continua rodando com o input do
-  // jogador desconectado simplesmente parado de chegar (o personagem
-  // fica parado no ar/chão conforme a física). Pausar a partida,
-  // dar um tempo de reconexão ou decretar walkover são decisões de
-  // produto a definir — não implementadas nesta etapa.
 
   return { state };
 };
@@ -142,22 +121,20 @@ export const matchLoop: nkruntime.MatchLoopFunction<BasketCloneMatchState> = fun
   state,
   messages
 ) {
-  logger.info("[basketclone:matchLoop] INÍCIO DO TICK %d. Phase: %s", tick, state.phase);
-
   state.tick = tick;
-  state.matchTimeMs += Math.round(1000 / MATCH_CONSTANTS.TICK_RATE);
+
+  // Atualiza tempo apenas se a partida está em andamento
+  if (state.phase === MatchPhase.IN_PROGRESS) {
+    state.matchTimeMs += Math.round(1000 / MATCH_CONSTANTS.TICK_RATE);
+    state.gameplay.matchTimeMs = state.matchTimeMs;
+  }
 
   const handlerCtx = { ctx, logger, nk, dispatcher, tick, state };
 
-  logger.info("[basketclone:matchLoop] Processando %d mensagens...", messages.length);
   messages.forEach((message) => {
     try {
       messageDispatcher.dispatch(handlerCtx, message);
     } catch (error) {
-      // Regra do projeto: não engolir exceções. Loga o contexto da
-      // falha e repropaga — diferente de um payload malformado (que
-      // os Handlers já tratam e descartam), isto aqui é uma falha
-      // inesperada no roteamento/handler em si.
       logger.error(
         "[basketclone:match] Erro ao processar mensagem opCode=%d de %s: %s",
         message.opCode,
@@ -167,27 +144,81 @@ export const matchLoop: nkruntime.MatchLoopFunction<BasketCloneMatchState> = fun
       throw error;
     }
   });
-  logger.info("[basketclone:matchLoop] Processamento de mensagens concluído.");
 
   if (state.phase === MatchPhase.IN_PROGRESS) {
     const deltaSeconds = 1 / MATCH_CONSTANTS.TICK_RATE;
-    
-    logger.info("[basketclone:matchLoop] Iniciando GameplayEngine.update...");
     GameplayEngine.update(state.gameplay, deltaSeconds, logger);
-    logger.info("[basketclone:matchLoop] Fim de GameplayEngine.update.");
 
-    logger.info("[basketclone:matchLoop] Iniciando GameplayEngine.buildSnapshot...");
-    const snapshot = GameplayEngine.buildSnapshot(state.gameplay, logger);
-    logger.info("[basketclone:matchLoop] Fim de GameplayEngine.buildSnapshot.");
+    // Verifica condição de vitória por tempo
+    if (state.matchTimeMs >= MATCH_CONSTANTS.MATCH_DURATION_MS) {
+      finishMatch(state, logger, dispatcher);
+    }
 
-    logger.info("[basketclone:matchLoop] Antes de dispatcher.broadcastMessage...");
-    dispatcher.broadcastMessage(ServerOpCode.MATCH_STATE, JSON.stringify(snapshot));
-    logger.info("[basketclone:matchLoop] Depois de dispatcher.broadcastMessage.");
+    // Verifica condição de vitória por score (só se ainda não finalizou)
+    if (state.phase === MatchPhase.IN_PROGRESS) {
+      const winner = checkScoreVictory(state.gameplay.score);
+      if (winner !== null) {
+        state.gameplay.winner = winner;
+        finishMatch(state, logger, dispatcher);
+      }
+    }
+
+    // Só envia snapshot se a partida ainda está em andamento
+    if (state.phase === MatchPhase.IN_PROGRESS) {
+      const snapshot = GameplayEngine.buildSnapshot(state.gameplay, logger);
+      dispatcher.broadcastMessage(ServerOpCode.MATCH_STATE, JSON.stringify(snapshot));
+    }
   }
 
-  logger.info("[basketclone:matchLoop] FIM DO TICK %d.", tick);
   return { state };
 };
+
+function checkScoreVictory(score: { player1: number; player2: number }): PlayerId | null {
+  if (score.player1 >= MATCH_CONSTANTS.WINNING_SCORE) {
+    return "player1";
+  }
+  if (score.player2 >= MATCH_CONSTANTS.WINNING_SCORE) {
+    return "player2";
+  }
+  return null;
+}
+
+function finishMatch(
+  state: BasketCloneMatchState,
+  logger: nkruntime.Logger,
+  dispatcher: nkruntime.MatchDispatcher
+): void {
+  state.phase = MatchPhase.FINISHED;
+  state.gameplay.phase = MatchPhase.FINISHED;
+
+  // Determina vencedor por score se ainda não foi definido
+  if (state.gameplay.winner === null) {
+    if (state.gameplay.score.player1 > state.gameplay.score.player2) {
+      state.gameplay.winner = "player1";
+    } else if (state.gameplay.score.player2 > state.gameplay.score.player1) {
+      state.gameplay.winner = "player2";
+    }
+    // Se empatou, winner permanece null
+  }
+
+  logger.info(
+    "[basketclone:match] Partida finalizada. Vencedor: %s. Score: %d x %d. Tempo: %dms",
+    state.gameplay.winner ?? "empate",
+    state.gameplay.score.player1,
+    state.gameplay.score.player2,
+    state.matchTimeMs
+  );
+
+  // Broadcast mensagem de fim de partida para todos os clientes
+  const finishedPayload = {
+    winner: state.gameplay.winner,
+    score: state.gameplay.score,
+    matchTimeMs: state.matchTimeMs,
+  };
+
+  dispatcher.broadcastMessage(ServerOpCode.MATCH_FINISHED, JSON.stringify(finishedPayload));
+  logger.info("[basketclone:match] Broadcast MATCH_FINISHED enviado.");
+}
 
 export const matchSignal: nkruntime.MatchSignalFunction<BasketCloneMatchState> = function (
   ctx,
@@ -198,7 +229,7 @@ export const matchSignal: nkruntime.MatchSignalFunction<BasketCloneMatchState> =
   state,
   data
 ) {
-  logger.info("[basketclone:match] Sinal recebido (tick=%d): %s", tick, data);
+  logger.debug("[basketclone:match] Sinal recebido (tick=%d): %s", tick, data);
   return { state };
 };
 
@@ -212,6 +243,7 @@ export const matchTerminate: nkruntime.MatchTerminateFunction<BasketCloneMatchSt
   graceSeconds
 ) {
   state.phase = MatchPhase.FINISHED;
+  state.gameplay.phase = MatchPhase.FINISHED;
   logger.info("[basketclone:match] Partida encerrando. graceSeconds=%d", graceSeconds);
   return { state };
 };
