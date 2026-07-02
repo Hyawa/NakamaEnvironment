@@ -1,0 +1,45 @@
+/**
+ * Cópia 1:1 de src/core/GameConfig.ts (client/SinglePlayer).
+ *
+ * Nenhuma dependência de DOM/teclado/render — é puro dado, então
+ * não precisou de nenhuma adaptação para rodar no servidor.
+ */
+export const GameConfig = {
+  COURT_WIDTH: 700,
+  COURT_HEIGHT: 400,
+  FLOOR_Y: 360,
+  GRAVITY: 1400,
+  PLAYER_WIDTH: 30,
+  PLAYER_HEIGHT: 60,
+  PLAYER_SPEED: 220,
+  JUMP_VELOCITY: -480,
+  BALL_RADIUS: 12,
+
+  BALL_THROW_VX: 360,
+  BALL_THROW_VY: -650,
+  BALL_THROW_HIGH_VX: 260,
+  BALL_THROW_HIGH_VY: -680,
+
+  GROUND_BOUNCE_DAMPING: 0.35,
+  MIN_BOUNCE_VELOCITY: 40,
+
+  HOOP_WIDTH: 80,
+  HOOP_HEIGHT: 14,
+  HOOP_Y: 170,
+
+  SCORE_POINTS: 2,
+
+  POSSESSION_COOLDOWN_SECONDS: 0.3,
+
+  BOT_SPEED_FACTOR: 0.85,
+  BOT_REACTION_MIN_SECONDS: 0.1,
+  BOT_REACTION_MAX_SECONDS: 0.3,
+  BOT_ERROR_CHANCE: 0.12,
+  BOT_SHOOT_RANGE_X: 90,
+  BOT_JUMP_INTERCEPT_RANGE_X: 40,
+  BOT_JUMP_INTERCEPT_MIN_HEIGHT: 20,
+
+  RESTART_DELAY_SECONDS: 1.5,
+  PLAYER1_START_X_RATIO: 0.25,
+  PLAYER2_START_X_RATIO: 0.75,
+} as const;

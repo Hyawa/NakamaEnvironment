@@ -6,6 +6,9 @@
   "scripts": {
     "build": "rollup -c",
     "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "start": "nakama.exe --config local.yml --database.address postgres://admin:admin@127.0.0.1:5432/nakama-dev"
   },
   "keywords": [],
@@ -21,9 +24,11 @@
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-typescript": "^12.3.0",
+    "@vitest/coverage-v8": "^4.1.9",
     "rollup": "^4.62.2",
     "tslib": "^2.8.1",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
   },
   "dependencies": {
     "@vyron/memory-engine": "file:../vyron-memory-engine",

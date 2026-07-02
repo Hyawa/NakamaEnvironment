@@ -1,3 +1,5 @@
+// D:\Nakama\tsconfig.json
+
 {
   "compilerOptions": {
     "noImplicitReturns": true,
@@ -7,6 +9,8 @@
     "noUnusedLocals": true,
     "removeComments": true,
     "target": "es5",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
     "module": "ESNext",
     "strict": false,
   },
